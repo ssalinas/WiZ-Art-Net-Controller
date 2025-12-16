@@ -1,0 +1,17 @@
+{
+  "name": "wiz-art-net-controller",
+  "version": "1.0.0",
+  "description": "Smart light fixture management system",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": ["wiz", "art-net", "lighting", "controller"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^4.18.2",
+    "artnet-protocol": "^0.2.1"
+  }
+}
