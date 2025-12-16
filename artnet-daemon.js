@@ -22,7 +22,8 @@ class ArtNetWizBridge {
     this.devices = [];
     this.udpClient = dgram.createSocket('udp4');
     this.controller = new artNet.ArtNetController();
-    this.lastDmxValues = {}; // Track last values per fixture to avoid redundant updates
+    this.lastSentDmxValues = {}; // Track last values per fixture to avoid redundant updates
+    this.lastReceivedDmxValues = {}; // Track last values per fixture to avoid redundant updates
     this.messageQueues = {}; // Per-fixture message queues
     this.processing = {}; // Per-fixture processing flags
     this.queueStats = {}; // Per-fixture stats
@@ -37,7 +38,7 @@ class ArtNetWizBridge {
     });
 
     this.udpClient.on('message', (msg, rinfo) => {
-      console.debug(`UDP response from ${rinfo.address}:${rinfo.port}: ${msg}`);
+      //console.log(`UDP response from ${rinfo.address}:${rinfo.port}: ${msg}`);
     });
 
     this.udpClient.on('listening', () => {
@@ -55,8 +56,8 @@ class ArtNetWizBridge {
 
       // Initialize last values and queue structures for each device
       this.devices.forEach(device => {
-        this.lastDmxValues[device.macAddress] = { r: 0, g: 0, b: 0, c: 0, w: 0, dimming: 0, state: false };
-
+        this.lastReceivedDmxValues[device.macAddress] = { r: 0, g: 0, b: 0, c: 0, w: 0, dimming: 0, state: false };
+        this.lastSentDmxValues[device.macAddress] = { r: 0, g: 0, b: 0, c: 0, w: 0, dimming: 0, state: false };
         // Initialize queue structures if not already present
         if (!this.messageQueues[device.macAddress]) {
           this.messageQueues[device.macAddress] = [];
@@ -126,7 +127,7 @@ class ArtNetWizBridge {
       const state = dimming > 0;
 
       // Check if values have changed for this device (comparing against last SENT values)
-      const lastValues = this.lastDmxValues[device.macAddress];
+      const lastValues = this.lastReceivedDmxValues[device.macAddress];
       if (lastValues.r === r &&
           lastValues.g === g &&
           lastValues.b === b &&
@@ -138,13 +139,21 @@ class ArtNetWizBridge {
       }
 
       // Enqueue message with raw DMX values
-      // Don't update lastDmxValues here - it will be updated after message is actually sent
       this.enqueueMessage(device, r, g, b, c, w, dimming, state);
+      this.lastReceivedDmxValues[device.macAddress] = {
+          r: r,
+          g: g,
+          b: b,
+          c: c,
+          w: w,
+          dimming: dimming,
+          state: state
+        };
     });
   }
 
-  enqueueMessage(device, r, g, b, c, w, dimming, state) {
-    const message = { device, r, g, b, c, w, dimming, state };
+  enqueueMessage(device, r, g, b, c, w, dimming, state, retryCount = 0) {
+    const message = { device, r, g, b, c, w, dimming, state, retryCount };
     const queue = this.messageQueues[device.macAddress];
 
     // Queue size limit to prevent memory issues (drop oldest if > 10)
@@ -159,6 +168,57 @@ class ArtNetWizBridge {
 
     // Start processing if not already processing
     this.processQueue(device.macAddress);
+  }
+
+  verifyState(device, expectedState, timeout = 1000) {
+    return new Promise((resolve) => {
+      const getPilotMsg = JSON.stringify({
+        method: 'getPilot',
+        params: {}
+      });
+
+      const msgBuffer = Buffer.from(getPilotMsg);
+      let responseReceived = false;
+
+      // Set up temporary listener for response
+      const responseHandler = (msg, rinfo) => {
+        if (rinfo.address !== device.ipAddress) {
+          return;
+        }
+
+        try {
+          const response = JSON.parse(msg.toString());
+          if (response.method === 'getPilot' && response.result) {
+            responseReceived = true;
+            const actualState = response.result.state || false;
+            resolve(actualState === expectedState);
+          }
+        } catch (err) {
+          // Ignore parse errors
+        }
+      };
+
+      // Add temporary listener
+      this.udpClient.on('message', responseHandler);
+
+      // Send getPilot request
+      this.udpClient.send(msgBuffer, 0, msgBuffer.length, 38899, device.ipAddress, (err) => {
+        if (err) {
+          console.error(`Error sending getPilot to ${device.name}:`, err.message);
+          this.udpClient.removeListener('message', responseHandler);
+          resolve(false); // Assume verification failed
+        }
+      });
+
+      // Timeout if no response
+      setTimeout(() => {
+        this.udpClient.removeListener('message', responseHandler);
+        if (!responseReceived) {
+          console.warn(`No response from ${device.name} for state verification`);
+          resolve(false);
+        }
+      }, timeout);
+    });
   }
 
   processQueue(macAddress) {
@@ -181,8 +241,17 @@ class ArtNetWizBridge {
     const message = queue.shift();
 
     // Calculate stateChanged based on last SENT state
-    const lastSentValues = this.lastDmxValues[macAddress];
+    const lastSentValues = this.lastSentDmxValues[macAddress];
     const stateChanged = lastSentValues.state !== message.state;
+    if (lastSentValues.r === message.r &&
+        lastSentValues.g === message.g &&
+        lastSentValues.b === message.b &&
+        lastSentValues.c === message.c &&
+        lastSentValues.w === message.w &&
+        lastSentValues.dimming === message.dimming &&
+        lastSentValues.state === message.state) {
+      return; // No change, skip update
+    }
 
     // Send message and wait for completion
     this.sendWizCommandQueued(
@@ -190,13 +259,50 @@ class ArtNetWizBridge {
       message.r, message.g, message.b,
       message.c, message.w,
       message.dimming, message.state, stateChanged,
-      () => {
+      async () => {
         // Callback when send completes
         this.queueStats[macAddress].sent++;
+
+        // For critical state changes to OFF, verify the state was actually applied
+        if (stateChanged && !message.state) {
+          console.log(`Verifying turn-off for ${message.device.name}...`);
+
+          // Wait a bit for the fixture to process the command
+          await new Promise(resolve => setTimeout(resolve, 200));
+
+          const verified = await this.verifyState(message.device, false, 1000);
+
+          if (!verified && message.retryCount < 3) {
+            console.warn(
+              `State verification failed for ${message.device.name}, ` +
+              `retrying (attempt ${message.retryCount + 1}/3)`
+            );
+
+            // Re-enqueue the message with incremented retry count
+            this.processing[macAddress] = false;
+            this.enqueueMessage(
+              message.device,
+              message.r, message.g, message.b,
+              message.c, message.w,
+              message.dimming, message.state,
+              message.retryCount + 1
+            );
+            return;
+          }
+
+          if (!verified) {
+            console.error(
+              `State verification failed for ${message.device.name} after 3 attempts, giving up`
+            );
+          } else {
+            console.log(`State verified successfully for ${message.device.name}`);
+          }
+        }
+
         this.processing[macAddress] = false;
 
         // Update lastDmxValues to track what was actually sent
-        this.lastDmxValues[macAddress] = {
+        this.lastSentDmxValues[macAddress] = {
           r: message.r,
           g: message.g,
           b: message.b,
