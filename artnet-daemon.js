@@ -23,6 +23,9 @@ class ArtNetWizBridge {
     this.udpClient = dgram.createSocket('udp4');
     this.controller = new artNet.ArtNetController();
     this.lastDmxValues = {}; // Track last values per fixture to avoid redundant updates
+    this.messageQueues = {}; // Per-fixture message queues
+    this.processing = {}; // Per-fixture processing flags
+    this.queueStats = {}; // Per-fixture stats
     this.localIp = getLocalIpAddress();
 
     this.setupUdpClient();
@@ -34,7 +37,7 @@ class ArtNetWizBridge {
     });
 
     this.udpClient.on('message', (msg, rinfo) => {
-      console.log(`UDP response from ${rinfo.address}:${rinfo.port}: ${msg}`);
+      console.debug(`UDP response from ${rinfo.address}:${rinfo.port}: ${msg}`);
     });
 
     this.udpClient.on('listening', () => {
@@ -50,9 +53,16 @@ class ArtNetWizBridge {
       this.devices = await storage.readAll();
       console.log(`Loaded ${this.devices.length} devices from database`);
 
-      // Initialize last values for each device
+      // Initialize last values and queue structures for each device
       this.devices.forEach(device => {
-        this.lastDmxValues[device.macAddress] = { r: 0, g: 0, b: 0, c: 0, w: 0, dimming: 0 };
+        this.lastDmxValues[device.macAddress] = { r: 0, g: 0, b: 0, c: 0, w: 0, dimming: 0, state: false };
+
+        // Initialize queue structures if not already present
+        if (!this.messageQueues[device.macAddress]) {
+          this.messageQueues[device.macAddress] = [];
+          this.processing[device.macAddress] = false;
+          this.queueStats[device.macAddress] = { queued: 0, sent: 0, dropped: 0 };
+        }
       });
     } catch (err) {
       console.error('Error loading devices:', err);
@@ -69,6 +79,21 @@ class ArtNetWizBridge {
     setInterval(() => {
       this.loadDevices();
     }, 60000);
+
+    // Log queue stats every 30 seconds
+    setInterval(() => {
+      Object.keys(this.queueStats).forEach(mac => {
+        const stats = this.queueStats[mac];
+        const queueLength = this.messageQueues[mac] ? this.messageQueues[mac].length : 0;
+        if (stats.queued > 0 || stats.dropped > 0 || queueLength > 0) {
+          console.log(
+            `[Queue Stats] ${mac}: ` +
+            `Queued: ${stats.queued}, Sent: ${stats.sent}, Dropped: ${stats.dropped}, ` +
+            `Current Queue Length: ${queueLength}`
+          );
+        }
+      });
+    }, 30000);
 
     // Bind Art-Net controller to local IP
     this.controller.bind(this.localIp);
@@ -98,10 +123,9 @@ class ArtNetWizBridge {
 
       // Convert dimmer from 0-255 to 0-100
       const dimming = Math.round((dimmerRaw / 255) * 100);
-      const state = dimming > 0
-      console.log(state);
+      const state = dimming > 0;
 
-      // Check if values have changed for this device
+      // Check if values have changed for this device (comparing against last SENT values)
       const lastValues = this.lastDmxValues[device.macAddress];
       if (lastValues.r === r &&
           lastValues.g === g &&
@@ -113,16 +137,85 @@ class ArtNetWizBridge {
         return; // No change, skip update
       }
 
-      // Update last values
-      this.lastDmxValues[device.macAddress] = { r, g, b, c, w, dimming, state };
-
-      // Send command to WiZ fixture
-      this.sendWizCommand(device, r, g, b, c, w, dimming, state, lastValues.state !== state);
+      // Enqueue message with raw DMX values
+      // Don't update lastDmxValues here - it will be updated after message is actually sent
+      this.enqueueMessage(device, r, g, b, c, w, dimming, state);
     });
   }
 
-  sendWizCommand(device, r, g, b, c, w, dimming, state, stateChanged) {
+  enqueueMessage(device, r, g, b, c, w, dimming, state) {
+    const message = { device, r, g, b, c, w, dimming, state };
+    const queue = this.messageQueues[device.macAddress];
+
+    // Queue size limit to prevent memory issues (drop oldest if > 10)
+    if (queue.length >= 10) {
+      queue.shift(); // Drop oldest message
+      this.queueStats[device.macAddress].dropped++;
+      console.warn(`Queue full for ${device.name}, dropping oldest message`);
+    }
+
+    queue.push(message);
+    this.queueStats[device.macAddress].queued++;
+
+    // Start processing if not already processing
+    this.processQueue(device.macAddress);
+  }
+
+  processQueue(macAddress) {
+    // If already processing this fixture, return (will be called after current message completes)
+    if (this.processing[macAddress]) {
+      return;
+    }
+
+    const queue = this.messageQueues[macAddress];
+
+    // If queue is empty, nothing to do
+    if (queue.length === 0) {
+      return;
+    }
+
+    // Mark as processing
+    this.processing[macAddress] = true;
+
+    // Get next message
+    const message = queue.shift();
+
+    // Calculate stateChanged based on last SENT state
+    const lastSentValues = this.lastDmxValues[macAddress];
+    const stateChanged = lastSentValues.state !== message.state;
+
+    // Send message and wait for completion
+    this.sendWizCommandQueued(
+      message.device,
+      message.r, message.g, message.b,
+      message.c, message.w,
+      message.dimming, message.state, stateChanged,
+      () => {
+        // Callback when send completes
+        this.queueStats[macAddress].sent++;
+        this.processing[macAddress] = false;
+
+        // Update lastDmxValues to track what was actually sent
+        this.lastDmxValues[macAddress] = {
+          r: message.r,
+          g: message.g,
+          b: message.b,
+          c: message.c,
+          w: message.w,
+          dimming: message.dimming,
+          state: message.state
+        };
+
+        // Process next message in queue
+        this.processQueue(macAddress);
+      }
+    );
+  }
+
+  sendWizCommandQueued(device, r, g, b, c, w, dimming, state, stateChanged, callback) {
     if (!state && !stateChanged) {
+      // Skip sending but still call callback to continue queue processing
+      if (callback) callback();
       return;
     }
     const params = {
@@ -166,6 +259,9 @@ class ArtNetWizBridge {
             `RGB(${r}, ${g}, ${b}) C: ${c} W: ${w} Dimming: ${dimming}% State: ${state}`
           );
         }
+
+        // Call callback to signal completion
+        if (callback) callback();
       }
     );
   }
