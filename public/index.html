@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WiZ Art-Net Controller</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      padding: 20px;
+      background-color: #f5f5f5;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      background: white;
+      padding: 30px;
+      border-radius: 8px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+
+    h1 {
+      margin-bottom: 30px;
+      color: #333;
+    }
+
+    .add-device-section {
+      margin-bottom: 30px;
+      padding: 20px;
+      background: #f9f9f9;
+      border-radius: 6px;
+    }
+
+    .add-device-section h2 {
+      margin-bottom: 15px;
+      font-size: 18px;
+      color: #555;
+    }
+
+    .form-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .form-row input {
+      padding: 8px 12px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+
+    .form-row button {
+      padding: 8px 20px;
+      background: #007bff;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    .form-row button:hover {
+      background: #0056b3;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 20px;
+    }
+
+    th, td {
+      padding: 12px;
+      text-align: left;
+      border-bottom: 1px solid #ddd;
+    }
+
+    th {
+      background-color: #f8f9fa;
+      font-weight: 600;
+      color: #555;
+    }
+
+    tr:hover {
+      background-color: #f9f9f9;
+    }
+
+    input[type="text"],
+    input[type="number"] {
+      width: 100%;
+      padding: 6px 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+
+    input[readonly] {
+      background-color: #f5f5f5;
+      cursor: not-allowed;
+    }
+
+    .actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    button {
+      padding: 6px 16px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    .update-btn {
+      background: #28a745;
+      color: white;
+    }
+
+    .update-btn:hover {
+      background: #218838;
+    }
+
+    .delete-btn {
+      background: #dc3545;
+      color: white;
+    }
+
+    .delete-btn:hover {
+      background: #c82333;
+    }
+
+    .message {
+      padding: 10px;
+      margin-bottom: 15px;
+      border-radius: 4px;
+      display: none;
+    }
+
+    .message.success {
+      background: #d4edda;
+      color: #155724;
+      border: 1px solid #c3e6cb;
+    }
+
+    .message.error {
+      background: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+    }
+
+    .message.show {
+      display: block;
+    }
+
+    .control-section {
+      margin-bottom: 20px;
+      padding: 15px;
+      background: #e8f4f8;
+      border-radius: 6px;
+      border-left: 4px solid #17a2b8;
+    }
+
+    .control-section h2 {
+      margin-bottom: 10px;
+      font-size: 16px;
+      color: #333;
+    }
+
+    .control-buttons {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .info-btn {
+      background: #17a2b8;
+      color: white;
+    }
+
+    .info-btn:hover {
+      background: #138496;
+    }
+
+    .success-btn {
+      background: #28a745;
+      color: white;
+    }
+
+    .success-btn:hover {
+      background: #218838;
+    }
+
+    .danger-btn {
+      background: #dc3545;
+      color: white;
+    }
+
+    .danger-btn:hover {
+      background: #c82333;
+    }
+
+    .status-indicator {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      margin-right: 5px;
+    }
+
+    .status-running {
+      background: #28a745;
+    }
+
+    .status-stopped {
+      background: #dc3545;
+    }
+
+    .discovery-results {
+      margin-top: 15px;
+      max-height: 200px;
+      overflow-y: auto;
+      background: white;
+      padding: 10px;
+      border-radius: 4px;
+      border: 1px solid #ddd;
+    }
+
+    .discovery-item {
+      padding: 8px;
+      margin-bottom: 8px;
+      background: #f8f9fa;
+      border-radius: 4px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .discovery-item:last-child {
+      margin-bottom: 0;
+    }
+
+    .discovery-info {
+      font-size: 13px;
+    }
+
+    .discovery-info strong {
+      font-weight: 600;
+    }
+
+    .add-discovered-btn {
+      padding: 4px 12px;
+      font-size: 12px;
+      background: #007bff;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+
+    .add-discovered-btn:hover {
+      background: #0056b3;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>WiZ Art-Net Controller</h1>
+
+    <div id="message" class="message"></div>
+
+    <div class="control-section">
+      <h2>Art-Net Daemon Status</h2>
+      <div class="control-buttons">
+        <span id="daemonStatus">
+          <span class="status-indicator status-stopped"></span>
+          Checking...
+        </span>
+        <button class="success-btn" onclick="startDaemon()">Start</button>
+        <button class="danger-btn" onclick="stopDaemon()">Stop</button>
+      </div>
+    </div>
+
+    <div class="control-section">
+      <h2>Discover WiZ Fixtures</h2>
+      <div class="control-buttons">
+        <button class="info-btn" onclick="discoverFixtures()">Scan Network</button>
+        <span id="discoveryStatus"></span>
+      </div>
+      <div id="discoveryResults" class="discovery-results" style="display: none;"></div>
+    </div>
+
+    <div class="add-device-section">
+      <h2>Add New Device</h2>
+      <div class="form-row">
+        <input type="text" id="newMac" placeholder="MAC Address (e.g., AA:BB:CC:DD:EE:FF)" />
+        <input type="text" id="newIp" placeholder="IP Address" />
+        <input type="text" id="newName" placeholder="Name" />
+        <input type="text" id="newType" placeholder="Type" />
+        <input type="number" id="newChannel" placeholder="Channel" />
+        <button onclick="addDevice()">Add Device</button>
+      </div>
+    </div>
+
+    <table id="devicesTable">
+      <thead>
+        <tr>
+          <th>MAC Address</th>
+          <th>IP Address</th>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Channel</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="devicesBody">
+      </tbody>
+    </table>
+  </div>
+
+  <script>
+    let devices = [];
+
+    // Show message
+    function showMessage(text, type = 'success') {
+      const messageEl = document.getElementById('message');
+      messageEl.textContent = text;
+      messageEl.className = `message ${type} show`;
+      setTimeout(() => {
+        messageEl.className = 'message';
+      }, 3000);
+    }
+
+    // Fetch and display all devices
+    async function loadDevices() {
+      try {
+        const response = await fetch('/api/devices');
+        devices = await response.json();
+        renderDevices();
+      } catch (err) {
+        showMessage('Error loading devices: ' + err.message, 'error');
+      }
+    }
+
+    // Render devices table
+    function renderDevices() {
+      const tbody = document.getElementById('devicesBody');
+      tbody.innerHTML = '';
+
+      devices.forEach(device => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td>
+            <input type="text" value="${device.macAddress}" readonly />
+          </td>
+          <td>
+            <input type="text" id="ip-${device.macAddress}" value="${device.ipAddress}" />
+          </td>
+          <td>
+            <input type="text" id="name-${device.macAddress}" value="${device.name}" />
+          </td>
+          <td>
+            <input type="text" id="type-${device.macAddress}" value="${device.type}" />
+          </td>
+          <td>
+            <input type="number" id="channel-${device.macAddress}" value="${device.channel}" />
+          </td>
+          <td class="actions">
+            <button class="update-btn" onclick="updateDevice('${device.macAddress}')">Update</button>
+            <button class="delete-btn" onclick="deleteDevice('${device.macAddress}')">Delete</button>
+          </td>
+        `;
+        tbody.appendChild(row);
+      });
+    }
+
+    // Add new device
+    async function addDevice() {
+      const macAddress = document.getElementById('newMac').value.trim();
+      const ipAddress = document.getElementById('newIp').value.trim();
+      const name = document.getElementById('newName').value.trim();
+      const type = document.getElementById('newType').value.trim();
+      const channel = parseInt(document.getElementById('newChannel').value);
+
+      if (!macAddress || !ipAddress || !name || !type || isNaN(channel)) {
+        showMessage('Please fill in all fields', 'error');
+        return;
+      }
+
+      try {
+        const response = await fetch('/api/devices', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ macAddress, ipAddress, name, type, channel })
+        });
+
+        if (response.ok) {
+          showMessage('Device added successfully');
+          document.getElementById('newMac').value = '';
+          document.getElementById('newIp').value = '';
+          document.getElementById('newName').value = '';
+          document.getElementById('newType').value = '';
+          document.getElementById('newChannel').value = '';
+          loadDevices();
+        } else {
+          const error = await response.json();
+          showMessage('Error: ' + error.error, 'error');
+        }
+      } catch (err) {
+        showMessage('Error adding device: ' + err.message, 'error');
+      }
+    }
+
+    // Update device
+    async function updateDevice(macAddress) {
+      const ipAddress = document.getElementById(`ip-${macAddress}`).value.trim();
+      const name = document.getElementById(`name-${macAddress}`).value.trim();
+      const type = document.getElementById(`type-${macAddress}`).value.trim();
+      const channel = parseInt(document.getElementById(`channel-${macAddress}`).value);
+
+      try {
+        const response = await fetch(`/api/devices/${macAddress}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ipAddress, name, type, channel })
+        });
+
+        if (response.ok) {
+          showMessage('Device updated successfully');
+          loadDevices();
+        } else {
+          const error = await response.json();
+          showMessage('Error: ' + error.error, 'error');
+        }
+      } catch (err) {
+        showMessage('Error updating device: ' + err.message, 'error');
+      }
+    }
+
+    // Delete device
+    async function deleteDevice(macAddress) {
+      if (!confirm(`Are you sure you want to delete device ${macAddress}?`)) {
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/devices/${macAddress}`, {
+          method: 'DELETE'
+        });
+
+        if (response.ok) {
+          showMessage('Device deleted successfully');
+          loadDevices();
+        } else {
+          const error = await response.json();
+          showMessage('Error: ' + error.error, 'error');
+        }
+      } catch (err) {
+        showMessage('Error deleting device: ' + err.message, 'error');
+      }
+    }
+
+    // Check daemon status
+    async function checkDaemonStatus() {
+      try {
+        const response = await fetch('/api/artnet/status');
+        const status = await response.json();
+        const statusEl = document.getElementById('daemonStatus');
+
+        if (status.running) {
+          statusEl.innerHTML = `
+            <span class="status-indicator status-running"></span>
+            Running (restarts: ${status.restartCount})
+          `;
+        } else {
+          statusEl.innerHTML = `
+            <span class="status-indicator status-stopped"></span>
+            Stopped
+          `;
+        }
+      } catch (err) {
+        console.error('Error checking daemon status:', err);
+      }
+    }
+
+    // Start Art-Net daemon
+    async function startDaemon() {
+      try {
+        const response = await fetch('/api/artnet/start', { method: 'POST' });
+        if (response.ok) {
+          showMessage('Art-Net daemon started');
+          setTimeout(checkDaemonStatus, 500);
+        } else {
+          const error = await response.json();
+          showMessage('Error: ' + error.error, 'error');
+        }
+      } catch (err) {
+        showMessage('Error starting daemon: ' + err.message, 'error');
+      }
+    }
+
+    // Stop Art-Net daemon
+    async function stopDaemon() {
+      try {
+        const response = await fetch('/api/artnet/stop', { method: 'POST' });
+        if (response.ok) {
+          showMessage('Art-Net daemon stopped');
+          setTimeout(checkDaemonStatus, 500);
+        } else {
+          const error = await response.json();
+          showMessage('Error: ' + error.error, 'error');
+        }
+      } catch (err) {
+        showMessage('Error stopping daemon: ' + err.message, 'error');
+      }
+    }
+
+    // Discover WiZ fixtures
+    async function discoverFixtures() {
+      const statusEl = document.getElementById('discoveryStatus');
+      const resultsEl = document.getElementById('discoveryResults');
+
+      statusEl.textContent = 'Scanning...';
+      resultsEl.style.display = 'none';
+
+      try {
+        const response = await fetch('/api/discover', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ timeout: 3000 })
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          statusEl.textContent = `Found ${data.discovered.length} device(s)`;
+
+          if (data.discovered.length > 0) {
+            displayDiscoveryResults(data.discovered);
+          }
+        } else {
+          const error = await response.json();
+          showMessage('Error: ' + error.error, 'error');
+          statusEl.textContent = '';
+        }
+      } catch (err) {
+        showMessage('Error during discovery: ' + err.message, 'error');
+        statusEl.textContent = '';
+      }
+    }
+
+    // Display discovery results
+    function displayDiscoveryResults(discovered) {
+      const resultsEl = document.getElementById('discoveryResults');
+      resultsEl.innerHTML = '';
+      resultsEl.style.display = 'block';
+
+      discovered.forEach(device => {
+        const item = document.createElement('div');
+        item.className = 'discovery-item';
+        item.innerHTML = `
+          <div class="discovery-info">
+            <strong>MAC:</strong> ${device.macAddress} |
+            <strong>IP:</strong> ${device.ipAddress} |
+            <strong>State:</strong> ${device.state ? 'On' : 'Off'} |
+            <strong>Signal:</strong> ${device.rssi} dBm
+          </div>
+          <button class="add-discovered-btn" onclick="addDiscoveredDevice('${device.macAddress}', '${device.ipAddress}')">
+            Add
+          </button>
+        `;
+        resultsEl.appendChild(item);
+      });
+    }
+
+    // Add discovered device
+    async function addDiscoveredDevice(macAddress, ipAddress) {
+      document.getElementById('newMac').value = macAddress;
+      document.getElementById('newIp').value = ipAddress;
+      document.getElementById('newName').value = `WiZ ${macAddress.slice(-8)}`;
+      document.getElementById('newType').value = 'WiZ RGB';
+      document.getElementById('newChannel').focus();
+
+      showMessage('Pre-filled device info. Please set channel and click Add Device.');
+    }
+
+    // Load devices on page load
+    loadDevices();
+    checkDaemonStatus();
+
+    // Check daemon status every 5 seconds
+    setInterval(checkDaemonStatus, 5000);
+  </script>
+</body>
+</html>
