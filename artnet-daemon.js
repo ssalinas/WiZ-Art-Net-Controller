@@ -17,6 +17,15 @@ function getLocalIpAddress() {
   return '0.0.0.0';
 }
 
+// Normalize MAC address to format with colons (e.g., "6c29902a549c" -> "6c:29:90:2a:54:9c")
+function normalizeMacAddress(mac) {
+  // Remove any existing separators
+  const cleaned = mac.replace(/[:-]/g, '').toLowerCase();
+
+  // Add colons every 2 characters
+  return cleaned.match(/.{1,2}/g).join(':');
+}
+
 class ArtNetWizBridge {
   constructor() {
     this.devices = [];
@@ -37,8 +46,40 @@ class ArtNetWizBridge {
       console.error(`UDP client error: ${err.stack}`);
     });
 
-    this.udpClient.on('message', (msg, rinfo) => {
-      //console.log(`UDP response from ${rinfo.address}:${rinfo.port}: ${msg}`);
+    this.udpClient.on('message', async (msg, rinfo) => {
+      try {
+        const message = JSON.parse(msg.toString());
+
+        // Check if this is a getPilot response with MAC address
+        if (message.method === 'getPilot' && message.result && message.result.mac) {
+          const normalizedMac = normalizeMacAddress(message.result.mac);
+          const sourceIp = rinfo.address;
+
+          // Find device by MAC address
+          const device = this.devices.find(d => d.macAddress === normalizedMac);
+
+          if (device) {
+            // Check if IP address has changed
+            if (device.ipAddress !== sourceIp) {
+              console.log(
+                `IP address changed for ${device.name} (${normalizedMac}): ` +
+                `${device.ipAddress} -> ${sourceIp}`
+              );
+
+              // Update device in storage
+              try {
+                await storage.update(normalizedMac, { ipAddress: sourceIp });
+                device.ipAddress = sourceIp; // Update in-memory copy
+                console.log(`Updated IP address for ${device.name} in database`);
+              } catch (err) {
+                console.error(`Failed to update IP address for ${device.name}:`, err.message);
+              }
+            }
+          }
+        }
+      } catch (err) {
+        // Ignore parse errors or other issues - this is a passive listener
+      }
     });
 
     this.udpClient.on('listening', () => {
@@ -51,8 +92,11 @@ class ArtNetWizBridge {
 
   async loadDevices() {
     try {
+      const prevCount = this.devices.length
       this.devices = await storage.readAll();
-      console.log(`Loaded ${this.devices.length} devices from database`);
+      if (this.devices.length !== prevCount) {
+        console.log(`Loaded ${this.devices.length} devices from database`);
+      }
 
       // Initialize last values and queue structures for each device
       this.devices.forEach(device => {
@@ -86,7 +130,7 @@ class ArtNetWizBridge {
       Object.keys(this.queueStats).forEach(mac => {
         const stats = this.queueStats[mac];
         const queueLength = this.messageQueues[mac] ? this.messageQueues[mac].length : 0;
-        if (stats.queued > 0 || stats.dropped > 0 || queueLength > 0) {
+        if (stats.queued > 10 || stats.dropped > 0 || queueLength > 10) {
           console.log(
             `[Queue Stats] ${mac}: ` +
             `Queued: ${stats.queued}, Sent: ${stats.sent}, Dropped: ${stats.dropped}, ` +
@@ -265,7 +309,7 @@ class ArtNetWizBridge {
 
         // For critical state changes to OFF, verify the state was actually applied
         if (stateChanged && !message.state) {
-          console.log(`Verifying turn-off for ${message.device.name}...`);
+          console.debug(`Verifying turn-off for ${message.device.name}...`);
 
           // Wait a bit for the fixture to process the command
           await new Promise(resolve => setTimeout(resolve, 200));
@@ -295,7 +339,7 @@ class ArtNetWizBridge {
               `State verification failed for ${message.device.name} after 3 attempts, giving up`
             );
           } else {
-            console.log(`State verified successfully for ${message.device.name}`);
+            console.debug(`State verified successfully for ${message.device.name}`);
           }
         }
 
@@ -360,7 +404,7 @@ class ArtNetWizBridge {
         if (err) {
           console.error(`Error sending to ${device.name} (${device.ipAddress}):`, err.message);
         } else {
-          console.log(
+          console.debug(
             `Sent to ${device.name} (${device.ipAddress}): ` +
             `RGB(${r}, ${g}, ${b}) C: ${c} W: ${w} Dimming: ${dimming}% State: ${state}`
           );
