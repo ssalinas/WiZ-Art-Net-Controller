@@ -3,6 +3,7 @@ const path = require('path');
 const storage = require('./storage');
 const { discoverWizFixtures } = require('./wiz-discovery');
 const { spawn } = require('child_process');
+const dgram = require('dgram');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -137,6 +138,144 @@ app.post('/api/artnet/stop', (req, res) => {
   stopArtNetDaemon();
   res.json({ message: 'Art-Net daemon stopped' });
 });
+
+// Identify a device by flashing it red
+app.post('/api/devices/:macAddress/identify', async (req, res) => {
+  try {
+    const device = await storage.read(req.params.macAddress);
+    if (!device) {
+      return res.status(404).json({ error: 'Device not found' });
+    }
+
+    // Start identify process (non-blocking)
+    identifyDevice(device).catch(err => {
+      console.error(`Error during identify for ${device.name}:`, err.message);
+    });
+
+    res.json({ message: `Identifying ${device.name}` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Helper functions for WiZ communication
+
+// Send getPilot to retrieve current state
+function sendGetPilot(ipAddress, timeout = 2000) {
+  return new Promise((resolve, reject) => {
+    const socket = dgram.createSocket('udp4');
+    const message = JSON.stringify({
+      method: 'getPilot',
+      params: {}
+    });
+
+    let responseReceived = false;
+
+    socket.on('message', (msg, rinfo) => {
+      if (rinfo.address !== ipAddress) {
+        return;
+      }
+
+      try {
+        const response = JSON.parse(msg.toString());
+        if (response.method === 'getPilot' && response.result) {
+          responseReceived = true;
+          socket.close();
+          resolve(response.result);
+        }
+      } catch (err) {
+        // Ignore parse errors
+      }
+    });
+
+    socket.on('error', (err) => {
+      socket.close();
+      reject(err);
+    });
+
+    socket.send(message, 0, message.length, 38899, ipAddress, (err) => {
+      if (err) {
+        socket.close();
+        reject(err);
+      }
+    });
+
+    setTimeout(() => {
+      if (!responseReceived) {
+        socket.close();
+        reject(new Error('getPilot timeout'));
+      }
+    }, timeout);
+  });
+}
+
+// Send setPilot to control light
+function sendSetPilot(ipAddress, params) {
+  return new Promise((resolve, reject) => {
+    const socket = dgram.createSocket('udp4');
+    const message = JSON.stringify({
+      id: 1,
+      method: 'setPilot',
+      params: params
+    });
+
+    socket.send(message, 0, message.length, 38899, ipAddress, (err) => {
+      socket.close();
+      if (err) {
+        reject(err);
+      } else {
+        resolve();
+      }
+    });
+  });
+}
+
+// Identify device by flashing it red
+async function identifyDevice(device) {
+  try {
+    console.log(`Starting identify for ${device.name} (${device.ipAddress})`);
+
+    // Get current state
+    const currentState = await sendGetPilot(device.ipAddress);
+    console.log(`Current state for ${device.name}:`, currentState);
+
+    // Flash red at full brightness
+    await sendSetPilot(device.ipAddress, {
+      r: 255,
+      g: 0,
+      b: 0,
+      dimming: 100,
+      state: true
+    });
+
+    console.log(`${device.name} flashing red...`);
+
+    // Wait 5 seconds
+    await new Promise(resolve => setTimeout(resolve, 5000));
+
+    // Restore original state
+    const restoreParams = {
+      state: currentState.state || false
+    };
+
+    // Restore color settings if they exist
+    if (currentState.r !== undefined) restoreParams.r = currentState.r;
+    if (currentState.g !== undefined) restoreParams.g = currentState.g;
+    if (currentState.b !== undefined) restoreParams.b = currentState.b;
+    if (currentState.c !== undefined) restoreParams.c = currentState.c;
+    if (currentState.w !== undefined) restoreParams.w = currentState.w;
+    if (currentState.dimming !== undefined) restoreParams.dimming = currentState.dimming;
+    if (currentState.temp !== undefined) restoreParams.temp = currentState.temp;
+    if (currentState.sceneId !== undefined) restoreParams.sceneId = currentState.sceneId;
+
+    await sendSetPilot(device.ipAddress, restoreParams);
+
+    console.log(`${device.name} restored to original state`);
+  } catch (err) {
+    console.error(`Failed to identify ${device.name}:`, err.message);
+    throw err;
+  }
+}
 
 // Art-Net daemon management functions
 function startArtNetDaemon() {
