@@ -138,6 +138,15 @@
       background: #c82333;
     }
 
+    .identify-btn {
+      background: #ffc107;
+      color: #212529;
+    }
+
+    .identify-btn:hover {
+      background: #e0a800;
+    }
+
     .message {
       padding: 10px;
       margin-bottom: 15px;
@@ -374,6 +383,7 @@
             <input type="number" id="channel-${device.macAddress}" value="${device.channel}" />
           </td>
           <td class="actions">
+            <button class="identify-btn" onclick="identifyDevice('${device.macAddress}')">Identify</button>
             <button class="update-btn" onclick="updateDevice('${device.macAddress}')">Update</button>
             <button class="delete-btn" onclick="deleteDevice('${device.macAddress}')">Delete</button>
           </td>
@@ -465,6 +475,25 @@
         }
       } catch (err) {
         showMessage('Error deleting device: ' + err.message, 'error');
+      }
+    }
+
+    // Identify device by flashing it red
+    async function identifyDevice(macAddress) {
+      try {
+        const response = await fetch(`/api/devices/${macAddress}/identify`, {
+          method: 'POST'
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          showMessage(data.message + ' - flashing red for 5 seconds');
+        } else {
+          const error = await response.json();
+          showMessage('Error: ' + error.error, 'error');
+        }
+      } catch (err) {
+        showMessage('Error identifying device: ' + err.message, 'error');
       }
     }
 
