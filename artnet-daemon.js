@@ -126,19 +126,19 @@ class ArtNetWizBridge {
     }, 60000);
 
     // Log queue stats every 30 seconds
-    setInterval(() => {
-      Object.keys(this.queueStats).forEach(mac => {
-        const stats = this.queueStats[mac];
-        const queueLength = this.messageQueues[mac] ? this.messageQueues[mac].length : 0;
-        if (stats.queued > 10 || stats.dropped > 0 || queueLength > 10) {
-          console.log(
-            `[Queue Stats] ${mac}: ` +
-            `Queued: ${stats.queued}, Sent: ${stats.sent}, Dropped: ${stats.dropped}, ` +
-            `Current Queue Length: ${queueLength}`
-          );
-        }
-      });
-    }, 30000);
+    // setInterval(() => {
+    //   Object.keys(this.queueStats).forEach(mac => {
+    //     const stats = this.queueStats[mac];
+    //     const queueLength = this.messageQueues[mac] ? this.messageQueues[mac].length : 0;
+    //     if (stats.queued > 10 || stats.dropped > 0 || queueLength > 10) {
+    //       console.log(
+    //         `[Queue Stats] ${mac}: ` +
+    //         `Queued: ${stats.queued}, Sent: ${stats.sent}, Dropped: ${stats.dropped}, ` +
+    //         `Current Queue Length: ${queueLength}`
+    //       );
+    //     }
+    //   });
+    // }, 30000);
 
     // Bind Art-Net controller to local IP
     this.controller.bind(this.localIp);
@@ -309,7 +309,7 @@ class ArtNetWizBridge {
 
         // For critical state changes to OFF, verify the state was actually applied
         if (stateChanged && !message.state) {
-          console.debug(`Verifying turn-off for ${message.device.name}...`);
+          //console.debug(`Verifying turn-off for ${message.device.name}...`);
 
           // Wait a bit for the fixture to process the command
           await new Promise(resolve => setTimeout(resolve, 200));
@@ -338,9 +338,9 @@ class ArtNetWizBridge {
             console.error(
               `State verification failed for ${message.device.name} after 3 attempts, giving up`
             );
-          } else {
-            console.debug(`State verified successfully for ${message.device.name}`);
-          }
+          } //else {
+            //console.debug(`State verified successfully for ${message.device.name}`);
+          //}
         }
 
         this.processing[macAddress] = false;
@@ -404,10 +404,10 @@ class ArtNetWizBridge {
         if (err) {
           console.error(`Error sending to ${device.name} (${device.ipAddress}):`, err.message);
         } else {
-          console.debug(
-            `Sent to ${device.name} (${device.ipAddress}): ` +
-            `RGB(${r}, ${g}, ${b}) C: ${c} W: ${w} Dimming: ${dimming}% State: ${state}`
-          );
+          //console.debug(
+          //  `Sent to ${device.name} (${device.ipAddress}): ` +
+          //  `RGB(${r}, ${g}, ${b}) C: ${c} W: ${w} Dimming: ${dimming}% State: ${state}`
+          //);
         }
 
         // Call callback to signal completion
