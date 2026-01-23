@@ -30,6 +30,7 @@ class ArtNetWizBridge {
   constructor() {
     this.devices = [];
     this.udpClient = dgram.createSocket('udp4');
+    this.udpClient.setMaxListeners(0); // Remove listener limit
     this.controller = new artNet.ArtNetController();
     this.lastSentDmxValues = {}; // Track last values per fixture to avoid redundant updates
     this.lastReceivedDmxValues = {}; // Track last values per fixture to avoid redundant updates
