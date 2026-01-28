@@ -152,7 +152,11 @@ class ArtNetWizBridge {
   }
 
   handleDmxData(dmx) {
-    if (dmx.universe != 0) {
+    const maybeUniverse = process.env.DMX_UNIVERSE;
+    if (maybeUniverse && dmx.universe !== maybeUniverse) {
+      return
+    }
+    if (dmx.universe == 0) {
       return;
     }
     // Process each device
